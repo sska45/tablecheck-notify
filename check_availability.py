@@ -55,7 +55,12 @@ def check_shop_v1(shop):
         "Accept-Language": "ja,en;q=0.9",
     })
     reserve_url = f"https://www.tablecheck.com/{shop['lang']}/shops/{shop['slug']}/reserve"
-    res = session.get(reserve_url, timeout=15)
+    for attempt in range(3):
+        res = session.get(reserve_url, timeout=15)
+        if res.status_code == 429:
+            time.sleep(15 * (attempt + 1))
+            continue
+        break
     res.raise_for_status()
 
     match = re.search(r'<meta[^>]+name="csrf-token"[^>]+content="([^"]+)"', res.text)
