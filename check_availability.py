@@ -9,6 +9,7 @@ DISCORD_WEBHOOK_URL = os.environ["DISCORD_WEBHOOK_URL"]
 # 監視する店舗リスト（名前とTableCheckのスラグ）
 SHOPS = [
     {"name": "静龍苑", "slug": "seiryuen", "lang": "ja"},
+    {"name": "Add", "slug": "add", "lang": "ja"},
 ]
 
 NUM_GUESTS = 2   # 予約人数
@@ -77,17 +78,13 @@ def check_shop(shop):
 
 
 def notify_discord(available_slots):
-    # 店舗ごとにまとめる
-    by_shop = {}
-    for s in available_slots:
-        by_shop.setdefault(s["shop"], []).append(s)
+    # 日程が近い順にソートして最大3件に絞る
+    sorted_slots = sorted(available_slots, key=lambda s: (s["date"], s["time"]))[:3]
 
     lines = ["🍽️ **Tablecheck 空き枠通知**\n"]
-    for shop_name, slots in by_shop.items():
-        lines.append(f"**{shop_name}**")
-        for s in slots:
-            lines.append(f"　{s['date']} {s['time']} ({s['meal']})")
-        lines.append(f"　予約はこちら → {slots[0]['url']}\n")
+    for s in sorted_slots:
+        lines.append(f"**{s['shop']}**　{s['date']} {s['time']} ({s['meal']})")
+        lines.append(f"　→ {s['url']}\n")
 
     message = "\n".join(lines)
     # Discordの2000文字制限を考慮
