@@ -1,0 +1,24 @@
+name: Tablecheck 空き枠チェック
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"  # 5分ごとに実行
+  workflow_dispatch:        # 手動実行も可能
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: 依存パッケージインストール
+        run: pip install requests
+
+      - name: 空き枠チェック
+        run: python check_availability.py
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
