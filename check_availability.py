@@ -9,7 +9,7 @@ DISCORD_WEBHOOK_URL = os.environ["DISCORD_WEBHOOK_URL"]
 # 監視する店舗リスト（名前とTableCheckのスラグ）
 SHOPS = [
     {"name": "静龍苑", "slug": "seiryuen", "lang": "ja"},
-    {"name": "Add", "slug": "add", "lang": "ja"},
+    {"name": "Add", "slug": "add", "lang": "ja", "path": "ja/add"},
 ]
 
 NUM_GUESTS = 2   # 予約人数
@@ -23,7 +23,8 @@ def get_session_and_token(shop):
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         "Accept-Language": "ja,en;q=0.9",
     })
-    url = f"https://www.tablecheck.com/{shop['lang']}/shops/{shop['slug']}/reserve"
+    base = shop.get("path", f"{shop['lang']}/shops/{shop['slug']}")
+    url = f"https://www.tablecheck.com/{base}/reserve"
     res = session.get(url, timeout=15)
     res.raise_for_status()
 
@@ -33,11 +34,11 @@ def get_session_and_token(shop):
     if not match:
         raise ValueError(f"{shop['name']}: CSRFトークンが見つかりません")
 
-    return session, match.group(1), url
+    return session, match.group(1), url, base
 
 
 def check_shop(shop):
-    session, token, reserve_url = get_session_and_token(shop)
+    session, token, reserve_url, base = get_session_and_token(shop)
     available_slots = []
     today = datetime.now(timezone(timedelta(hours=9))).date()  # JST
 
@@ -50,9 +51,7 @@ def check_shop(shop):
             "reservation[num_people_adult]": str(NUM_GUESTS),
             "reservation[start_date]": date_str,
         }
-        timetable_url = (
-            f"https://www.tablecheck.com/{shop['lang']}/shops/{shop['slug']}/available/timetable"
-        )
+        timetable_url = f"https://www.tablecheck.com/{base}/available/timetable"
         r = session.get(timetable_url, params=params, timeout=15)
         if r.status_code != 200:
             time.sleep(1)
