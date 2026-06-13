@@ -170,7 +170,14 @@ def notify_discord(available_slots):
     for s in sorted_slots:
         meal = f" ({s['meal']})" if s["meal"] else ""
         lines.append(f"**{s['shop']}**　{s['date']} {s['time']}{meal}")
-        lines.append(f"　→ {s['url']}\n")
+
+    # 登場した店舗のURLを重複なく末尾にまとめる
+    seen = {}
+    for s in sorted_slots:
+        seen.setdefault(s["shop"], s["url"])
+    lines.append("")
+    for shop_name, url in seen.items():
+        lines.append(f"→ {url}")
 
     message = "\n".join(lines)
     if len(message) > 1900:
