@@ -72,8 +72,11 @@ def check_shop_v1(shop):
 
     available_slots = []
     today = datetime.now(JST).date()
+    end_date = today + timedelta(days=DAYS_AHEAD)
+    seen_dates = set()
 
-    for i in range(DAYS_AHEAD):
+    # 1リクエストで約5日分返るので5日刻みで叩く（60→12リクエスト）
+    for i in range(0, DAYS_AHEAD, 5):
         date_str = (today + timedelta(days=i)).strftime("%Y-%m-%d")
         params = {
             "authenticity_token": token,
@@ -84,22 +87,31 @@ def check_shop_v1(shop):
             f"https://www.tablecheck.com/{shop['lang']}/shops/{shop['slug']}/available/timetable",
             params=params, timeout=15,
         )
+        if r.status_code == 429:
+            time.sleep(15)
+            continue
         if r.status_code != 200:
             time.sleep(1)
             continue
 
-        slots = r.json().get("data", {}).get("slots", {}).get(date_str, {})
-        for _ts, slot in slots.items():
-            if slot.get("available"):
-                sec = slot.get("seconds", 0)
-                available_slots.append({
+        all_date_slots = r.json().get("data", {}).get("slots", {})
+        for d_str, day_slots in all_date_slots.items():
+            if d_str in seen_dates:
+                continue
+            if d_str < today.strftime("%Y-%m-%d") or d_str >= end_date.strftime("%Y-%m-%d"):
+                continue
+            seen_dates.add(d_str)
+            for _ts, slot in day_slots.items():
+                if slot.get("available"):
+                    sec = slot.get("seconds", 0)
+                    available_slots.append({
                     "shop": shop["name"],
-                    "date": date_str,
+                    "date": d_str,
                     "time": f"{sec // 3600:02d}:{(sec % 3600) // 60:02d}",
                     "meal": slot.get("meal", ""),
                     "url": reserve_url,
                 })
-        time.sleep(0.5)
+        time.sleep(1)
 
     return available_slots
 
