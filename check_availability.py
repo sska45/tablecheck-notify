@@ -2,6 +2,7 @@ import requests
 import re
 import os
 import time
+import json
 from datetime import datetime, timedelta, timezone
 
 DISCORD_WEBHOOK_URL = os.environ["DISCORD_WEBHOOK_URL"]
@@ -16,8 +17,31 @@ SHOPS = [
     {"name": "Add",    "slug": "add",      "lang": "ja", "widget": "v2"},
 ]
 
-NUM_GUESTS = 2   # 予約人数
-DAYS_AHEAD = 60  # 何日先まで確認するか
+NUM_GUESTS = 2    # 予約人数
+DAYS_AHEAD = 60   # 何日先まで確認するか
+COOLDOWN_MIN = 60 # 空き発見後の再チェックスキップ時間（分）
+STATE_FILE = "state.json"
+
+
+def load_state():
+    try:
+        with open(STATE_FILE) as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+
+def save_state(state):
+    with open(STATE_FILE, "w") as f:
+        json.dump(state, f)
+
+
+def is_in_cooldown(state, shop_slug):
+    last_found = state.get(shop_slug)
+    if not last_found:
+        return False
+    elapsed = (datetime.now(timezone.utc) - datetime.fromisoformat(last_found)).total_seconds()
+    return elapsed < COOLDOWN_MIN * 60
 
 
 # ── v1ウィジェット（旧Railsアプリ）────────────────────────────────────────
@@ -135,7 +159,7 @@ def check_shop_v2(shop):
 def notify_discord(available_slots):
     sorted_slots = sorted(available_slots, key=lambda s: (s["date"], s["time"]))[:3]
 
-    lines = ["🍽️ **Tablecheck 空き枠通知**\n"]
+    lines = ["@everyone 🍽️ **Tablecheck 空き枠通知**\n"]
     for s in sorted_slots:
         meal = f" ({s['meal']})" if s["meal"] else ""
         lines.append(f"**{s['shop']}**　{s['date']} {s['time']}{meal}")
@@ -150,17 +174,26 @@ def notify_discord(available_slots):
 
 
 def main():
+    state = load_state()
     all_available = []
+
     for shop in SHOPS:
+        if is_in_cooldown(state, shop["slug"]):
+            print(f"{shop['name']}: クールダウン中のためスキップ")
+            continue
         try:
             if shop.get("widget") == "v2":
                 slots = check_shop_v2(shop)
             else:
                 slots = check_shop_v1(shop)
-            all_available.extend(slots)
             print(f"{shop['name']}: {len(slots)} 件の空き枠")
+            if slots:
+                state[shop["slug"]] = datetime.now(timezone.utc).isoformat()
+            all_available.extend(slots)
         except Exception as e:
             print(f"{shop['name']}: エラー — {e}")
+
+    save_state(state)
 
     if all_available:
         notify_discord(all_available)

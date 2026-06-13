@@ -16,6 +16,13 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: 状態キャッシュを復元
+        uses: actions/cache@v4
+        with:
+          path: state.json
+          key: tablecheck-state-${{ github.run_id }}
+          restore-keys: tablecheck-state-
+
       - name: 依存パッケージインストール
         run: pip install requests
 
