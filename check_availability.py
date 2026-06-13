@@ -164,27 +164,25 @@ def check_shop_v2(shop):
 # ── 通知・メイン ────────────────────────────────────────────────────────────
 
 def notify_discord(available_slots):
-    sorted_slots = sorted(available_slots, key=lambda s: (s["date"], s["time"]))[:3]
+    # 店舗ごとにグループ化して個別送信
+    by_shop = {}
+    for s in available_slots:
+        by_shop.setdefault(s["shop"], []).append(s)
 
-    lines = ["@everyone 🍽️ **Tablecheck 空き枠通知**\n"]
-    for s in sorted_slots:
-        meal = f" ({s['meal']})" if s["meal"] else ""
-        lines.append(f"**{s['shop']}**　{s['date']} {s['time']}{meal}")
+    for shop_name, slots in by_shop.items():
+        top3 = sorted(slots, key=lambda s: (s["date"], s["time"]))[:3]
+        lines = [f"@everyone 🍽️ **Tablecheck 空き枠通知**\n"]
+        for s in top3:
+            meal = f" ({s['meal']})" if s["meal"] else ""
+            lines.append(f"**{s['shop']}**　{s['date']} {s['time']}{meal}")
+        lines.append(f"\n→ {top3[0]['url']}")
 
-    # 登場した店舗のURLを重複なく末尾にまとめる
-    seen = {}
-    for s in sorted_slots:
-        seen.setdefault(s["shop"], s["url"])
-    lines.append("")
-    for shop_name, url in seen.items():
-        lines.append(f"→ {url}")
+        message = "\n".join(lines)
+        if len(message) > 1900:
+            message = message[:1900] + "\n…（他にも空きあり）"
 
-    message = "\n".join(lines)
-    if len(message) > 1900:
-        message = message[:1900] + "\n…（他にも空きあり）"
-
-    res = requests.post(DISCORD_WEBHOOK_URL, json={"content": message}, timeout=10)
-    res.raise_for_status()
+        res = requests.post(DISCORD_WEBHOOK_URL, json={"content": message}, timeout=10)
+        res.raise_for_status()
 
 
 def main():
