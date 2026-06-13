@@ -15,7 +15,8 @@ JST = timezone(timedelta(hours=9))
 SHOPS = [
     {"name": "静龍苑",   "slug": "seiryuen",            "lang": "ja", "widget": "v1"},
     {"name": "鮨はし本", "slug": "hashimoto-sushi",     "lang": "ja", "widget": "v2"},
-    {"name": "Entraide", "slug": "entraide-kagurazaka", "lang": "ja", "widget": "v1"},
+    {"name": "Entraide",        "slug": "entraide-kagurazaka", "lang": "ja", "widget": "v1"},
+    {"name": "Restaurant Ryuzu", "slug": "restaurant-ryuzu",   "lang": "ja", "widget": "v1"},
 ]
 
 NUM_GUESTS = 2    # 予約人数
