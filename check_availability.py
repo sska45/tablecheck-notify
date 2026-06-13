@@ -84,24 +84,29 @@ def check_shop_v2(shop):
     end_str = end_date.strftime("%Y-%m-%d")
     reserve_url = f"https://www.tablecheck.com/{shop['lang']}/{shop['slug']}/reserve"
 
-    r = requests.post(
-        V2_API,
-        json={
-            "shop_id": shop["slug"],
-            "start_at": today_str,
-            "start_date": today_str,
-            "end_date": end_str,
-            "pax_adult": NUM_GUESTS,
-        },
-        headers={
-            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
-            "Accept": "application/json",
-            "Content-Type": "application/json",
-            "Origin": "https://www.tablecheck.com",
-            "Referer": "https://www.tablecheck.com/",
-        },
-        timeout=15,
-    )
+    for attempt in range(3):
+        r = requests.post(
+            V2_API,
+            json={
+                "shop_id": shop["slug"],
+                "start_at": today_str,
+                "start_date": today_str,
+                "end_date": end_str,
+                "pax_adult": NUM_GUESTS,
+            },
+            headers={
+                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+                "Origin": "https://www.tablecheck.com",
+                "Referer": "https://www.tablecheck.com/",
+            },
+            timeout=15,
+        )
+        if r.status_code == 429:
+            time.sleep(10 * (attempt + 1))
+            continue
+        break
     r.raise_for_status()
 
     body = r.json().get("availability_dates", {})
