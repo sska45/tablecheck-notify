@@ -17,6 +17,7 @@ SHOPS = [
     {"name": "鮨はし本", "slug": "hashimoto-sushi",     "lang": "ja", "widget": "v2"},
     {"name": "Entraide",     "slug": "entraide-kagurazaka", "lang": "ja", "widget": "v1"},
     {"name": "食堂みかん",   "slug": "shokudo-mikan",       "lang": "ja", "widget": "v1"},
+    {"name": "横浜mican",    "slug": "yokohama-mican",      "lang": "ja", "widget": "v2", "max_start_time": "19:30"},
 ]
 
 NUM_GUESTS = 2    # 予約人数
@@ -102,9 +103,15 @@ def check_shop_v1(shop):
             if d_str < today.strftime("%Y-%m-%d") or d_str >= end_date.strftime("%Y-%m-%d"):
                 continue
             seen_dates.add(d_str)
+            max_sec = shop.get("max_start_time")  # 例: "20:00" → 72000秒
+            if max_sec:
+                h, m = map(int, max_sec.split(":"))
+                max_sec = h * 3600 + m * 60
             for _ts, slot in day_slots.items():
                 if slot.get("available"):
                     sec = slot.get("seconds", 0)
+                    if max_sec is not None and sec > max_sec:
+                        continue
                     available_slots.append({
                     "shop": shop["name"],
                     "date": d_str,
@@ -157,16 +164,20 @@ def check_shop_v2(shop):
     if body.get("code") != "success":
         raise ValueError(f"{shop['name']}: APIエラー — {body.get('message')}")
 
+    max_start_time = shop.get("max_start_time")  # 例: "19:30"
     available_slots = []
     for date_str, slots in body.get("data", {}).items():
         for slot in slots:
             if slot.get("a"):
                 # タイムスタンプ "2026-06-14T11:00:00Z" → JST変換
                 t = datetime.fromisoformat(slot["t"].replace("Z", "+00:00")).astimezone(JST)
+                time_str = t.strftime("%H:%M")
+                if max_start_time is not None and time_str > max_start_time:
+                    continue
                 available_slots.append({
                     "shop": shop["name"],
                     "date": date_str,
-                    "time": t.strftime("%H:%M"),
+                    "time": time_str,
                     "meal": "",
                     "url": reserve_url,
                 })
