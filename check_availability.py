@@ -20,7 +20,8 @@ SHOPS = [
 
 NUM_GUESTS = 2    # 予約人数
 DAYS_AHEAD = 60   # 何日先まで確認するか
-COOLDOWN_MIN = 60 # 空き発見後の再チェックスキップ時間（分）
+COOLDOWN_MIN = 60       # 空き発見後の再チェックスキップ時間（分）
+ERROR_COOLDOWN_MIN = 60 * 24  # エラー通知の再送スキップ時間（分）
 STATE_FILE = "state.json"
 
 
@@ -37,12 +38,12 @@ def save_state(state):
         json.dump(state, f)
 
 
-def is_in_cooldown(state, shop_slug):
-    last_found = state.get(shop_slug)
-    if not last_found:
+def is_in_cooldown(state, key, minutes=COOLDOWN_MIN):
+    last = state.get(key)
+    if not last:
         return False
-    elapsed = (datetime.now(timezone.utc) - datetime.fromisoformat(last_found)).total_seconds()
-    return elapsed < COOLDOWN_MIN * 60
+    elapsed = (datetime.now(timezone.utc) - datetime.fromisoformat(last)).total_seconds()
+    return elapsed < minutes * 60
 
 
 # ── v1ウィジェット（旧Railsアプリ）────────────────────────────────────────
@@ -196,12 +197,19 @@ def notify_discord(available_slots):
         res.raise_for_status()
 
 
+def notify_discord_error():
+    message = "⚠️ アクセス制限で最新の空き情報が確認できていない状況が発生しています。"
+    res = requests.post(DISCORD_WEBHOOK_URL, json={"content": message}, timeout=10)
+    res.raise_for_status()
+
+
 def main():
     state = load_state()
     all_available = []
+    has_rate_limit_error = False
 
     for shop in SHOPS:
-        if is_in_cooldown(state, shop["slug"]):
+        if is_in_cooldown(state, shop["slug"], COOLDOWN_MIN):
             print(f"{shop['name']}: クールダウン中のためスキップ")
             continue
         try:
@@ -213,8 +221,20 @@ def main():
             if slots:
                 state[shop["slug"]] = datetime.now(timezone.utc).isoformat()
             all_available.extend(slots)
+        except requests.exceptions.HTTPError as e:
+            if e.response is not None and e.response.status_code == 429:
+                has_rate_limit_error = True
+            print(f"{shop['name']}: エラー — {e}")
         except Exception as e:
             print(f"{shop['name']}: エラー — {e}")
+
+    if has_rate_limit_error and not is_in_cooldown(state, "_rate_limit_error", ERROR_COOLDOWN_MIN):
+        try:
+            notify_discord_error()
+            state["_rate_limit_error"] = datetime.now(timezone.utc).isoformat()
+            print("レート制限エラーをDiscordに通知しました")
+        except Exception as e:
+            print(f"エラー通知の送信に失敗: {e}")
 
     save_state(state)
 
