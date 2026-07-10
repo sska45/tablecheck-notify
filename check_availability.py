@@ -22,9 +22,14 @@ SHOPS = [
 
 NUM_GUESTS = 2    # 予約人数
 DAYS_AHEAD = 60   # 何日先まで確認するか
-COOLDOWN_MIN = 60       # 空き発見後の再チェックスキップ時間（分）
+SLOT_COOLDOWN_MIN = 60 * 24  # 同じ枠を再通知しないスキップ時間（分）
 ERROR_COOLDOWN_MIN = 60 * 24  # エラー通知の再送スキップ時間（分）
 STATE_FILE = "state.json"
+
+
+def slot_key(slug, slot):
+    """枠を一意に識別するキー（店slug＋日付＋時刻）"""
+    return f"slot:{slug}|{slot['date']}|{slot['time']}"
 
 
 def load_state():
@@ -40,12 +45,27 @@ def save_state(state):
         json.dump(state, f)
 
 
-def is_in_cooldown(state, key, minutes=COOLDOWN_MIN):
+def is_in_cooldown(state, key, minutes):
     last = state.get(key)
     if not last:
         return False
     elapsed = (datetime.now(timezone.utc) - datetime.fromisoformat(last)).total_seconds()
     return elapsed < minutes * 60
+
+
+def prune_state(state):
+    """クールダウンを過ぎた枠の記録を削除して state.json の肥大化を防ぐ"""
+    now = datetime.now(timezone.utc)
+    for k in list(state.keys()):
+        if not k.startswith("slot:"):
+            continue
+        try:
+            elapsed = (now - datetime.fromisoformat(state[k])).total_seconds()
+        except (ValueError, TypeError):
+            del state[k]
+            continue
+        if elapsed >= SLOT_COOLDOWN_MIN * 60:
+            del state[k]
 
 
 # ── v1ウィジェット（旧Railsアプリ）────────────────────────────────────────
@@ -193,6 +213,7 @@ def notify_discord(available_slots):
     for s in available_slots:
         by_shop.setdefault(s["shop"], []).append(s)
 
+    displayed = []
     for shop_name, slots in by_shop.items():
         top3 = sorted(slots, key=lambda s: (s["date"], s["time"]))[:3]
         lines = [f"@everyone 🍽️ **Tablecheck 空き枠通知**\n"]
@@ -207,6 +228,9 @@ def notify_discord(available_slots):
 
         res = requests.post(DISCORD_WEBHOOK_URL, json={"content": message}, timeout=10)
         res.raise_for_status()
+        displayed.extend(top3)
+
+    return displayed
 
 
 def notify_discord_error():
@@ -217,28 +241,31 @@ def notify_discord_error():
 
 def main():
     state = load_state()
-    all_available = []
+    candidates = []      # 未通知（またはクールダウン切れ）の枠だけを集める
     has_rate_limit_error = False
 
     for shop in SHOPS:
-        if is_in_cooldown(state, shop["slug"], COOLDOWN_MIN):
-            print(f"{shop['name']}: クールダウン中のためスキップ")
-            continue
         try:
             if shop.get("widget") == "v2":
                 slots = check_shop_v2(shop)
             else:
                 slots = check_shop_v1(shop)
             print(f"{shop['name']}: {len(slots)} 件の空き枠")
-            if slots:
-                state[shop["slug"]] = datetime.now(timezone.utc).isoformat()
-            all_available.extend(slots)
         except requests.exceptions.HTTPError as e:
             if e.response is not None and e.response.status_code == 429:
                 has_rate_limit_error = True
             print(f"{shop['name']}: エラー — {e}")
+            continue
         except Exception as e:
             print(f"{shop['name']}: エラー — {e}")
+            continue
+
+        # 枠単位でクールダウン判定（24時間以内に通知済みの枠は除外）
+        for slot in slots:
+            if is_in_cooldown(state, slot_key(shop["slug"], slot), SLOT_COOLDOWN_MIN):
+                continue
+            slot["_slug"] = shop["slug"]
+            candidates.append(slot)
 
     if has_rate_limit_error and not is_in_cooldown(state, "_rate_limit_error", ERROR_COOLDOWN_MIN):
         try:
@@ -248,13 +275,17 @@ def main():
         except Exception as e:
             print(f"エラー通知の送信に失敗: {e}")
 
-    save_state(state)
-
-    if all_available:
-        notify_discord(all_available)
-        print(f"合計 {len(all_available)} 件の空き枠を通知しました")
+    if candidates:
+        notified = notify_discord(candidates)
+        now = datetime.now(timezone.utc).isoformat()
+        for slot in notified:
+            state[slot_key(slot["_slug"], slot)] = now
+        print(f"合計 {len(notified)} 件の空き枠を通知しました（新規枠 {len(candidates)} 件検出）")
     else:
-        print("空き枠なし")
+        print("新規の空き枠なし")
+
+    prune_state(state)
+    save_state(state)
 
 
 if __name__ == "__main__":
