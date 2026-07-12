@@ -18,7 +18,6 @@ JST = timezone(timedelta(hours=9))
 # 監視する店舗リスト
 SHOPS = [
     {"name": "nacol（浅草・イタリアン）", "url": "https://omakase.in/r/ur658194"},
-    {"name": "二条 やま岸（京都・日本料理）", "url": "https://omakase.in/r/ml772831"},
 ]
 
 NO_SLOT_TEXT = "ご予約可能な枠がありません"

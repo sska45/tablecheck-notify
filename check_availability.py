@@ -15,7 +15,6 @@ JST = timezone(timedelta(hours=9))
 SHOPS = [
     {"name": "静龍苑",   "slug": "seiryuen",            "lang": "ja", "widget": "v1"},
     {"name": "鮨はし本", "slug": "hashimoto-sushi",     "lang": "ja", "widget": "v2"},
-    {"name": "Entraide",     "slug": "entraide-kagurazaka", "lang": "ja", "widget": "v1"},
     {"name": "食堂みかん",   "slug": "shokudo-mikan",       "lang": "ja", "widget": "v1"},
     {"name": "横浜mican",    "slug": "yokohama-mican",      "lang": "ja", "widget": "v2", "max_start_time": "19:30"},
 ]
