@@ -21,6 +21,10 @@ SHOPS = [
 ]
 
 NO_SLOT_TEXT = "ご予約可能な枠がありません"
+# 未ログインで空き枠が存在するときに表示されるボタン文言
+SLOT_EXISTS_TEXTS = ["ログインして空き枠を確認", "このお店を予約する"]
+# 予約受付開始前などの「空きではない」状態
+NOT_OPEN_TEXTS = ["しばらくお待ち下さい", "ご予約開始までお待ちください"]
 NOTIFY_COOLDOWN_MIN = 60 * 24   # 空き検出通知の再送スキップ時間（分）
 BLOCK_COOLDOWN_MIN = 60 * 24    # Cloudflareブロック通知の再送スキップ時間（分）
 STATE_FILE = "omakase_state.json"
@@ -103,24 +107,36 @@ def main():
                 print(f"{shop['name']}: 空き枠なし")
                 continue
 
-            # 「枠がありません」表示が消えた＝枠が出た可能性が高い
-            key = f"notify:{shop['url']}"
-            if is_in_cooldown(state, key, NOTIFY_COOLDOWN_MIN):
-                print(f"{shop['name']}: 空きあり（クールダウン中のため通知スキップ）")
+            if any(t in text for t in NOT_OPEN_TEXTS):
+                print(f"{shop['name']}: 予約受付開始前")
                 continue
-            notify_discord(
-                f"@everyone 🍣 **OMAKASE 空き枠が出た可能性があります**\n"
-                f"**{shop['name']}**\n→ {shop['url']}"
-            )
-            state[key] = datetime.now(timezone.utc).isoformat()
-            print(f"{shop['name']}: 空きを検出、通知しました")
+
+            if any(t in text for t in SLOT_EXISTS_TEXTS):
+                # 未ログインでは枠の日時までは見えないが、空きの存在は確定
+                key = f"notify:{shop['url']}"
+                if is_in_cooldown(state, key, NOTIFY_COOLDOWN_MIN):
+                    print(f"{shop['name']}: 空きあり（クールダウン中のため通知スキップ）")
+                    continue
+                notify_discord(
+                    f"@everyone 🍣 **OMAKASE 空き枠が出ました**\n"
+                    f"**{shop['name']}**\n"
+                    f"ログインして枠を確認・予約してください\n→ {shop['url']}"
+                )
+                state[key] = datetime.now(timezone.utc).isoformat()
+                print(f"{shop['name']}: 空きを検出、通知しました")
+                continue
+
+            # 既知のどの状態にも該当しない＝ページ構造が変わった可能性
+            print(f"{shop['name']}: 未知のページ状態（要確認）")
+            blocked = True
 
         browser.close()
 
     if blocked and not is_in_cooldown(state, "_blocked", BLOCK_COOLDOWN_MIN):
         try:
             notify_discord(
-                "⚠️ OMAKASE監視: Cloudflareにブロックされ空き状況を確認できていない可能性があります。"
+                "⚠️ OMAKASE監視: 空き状況を確認できていない可能性があります"
+                "（Cloudflareブロックまたはページ構造の変更）。"
             )
             state["_blocked"] = datetime.now(timezone.utc).isoformat()
         except Exception as e:
