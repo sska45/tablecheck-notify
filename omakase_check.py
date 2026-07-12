@@ -1,0 +1,133 @@
+"""OMAKASE キャンセル拾い監視
+
+Cloudflare対策のため requests ではなく Playwright（実ブラウザ）でページを取得し、
+「ご予約可能な枠がありません」表示が消えたら Discord に通知する。
+"""
+import os
+import json
+import re
+from datetime import datetime, timedelta, timezone
+
+import requests
+from playwright.sync_api import sync_playwright
+
+DISCORD_WEBHOOK_URL = os.environ["DISCORD_WEBHOOK_URL"]
+
+JST = timezone(timedelta(hours=9))
+
+# 監視する店舗リスト
+SHOPS = [
+    {"name": "nacol（浅草・イタリアン）", "url": "https://omakase.in/r/ur658194"},
+]
+
+NO_SLOT_TEXT = "ご予約可能な枠がありません"
+NOTIFY_COOLDOWN_MIN = 60 * 24   # 空き検出通知の再送スキップ時間（分）
+BLOCK_COOLDOWN_MIN = 60 * 24    # Cloudflareブロック通知の再送スキップ時間（分）
+STATE_FILE = "omakase_state.json"
+
+
+def load_state():
+    try:
+        with open(STATE_FILE) as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+
+def save_state(state):
+    with open(STATE_FILE, "w") as f:
+        json.dump(state, f)
+
+
+def is_in_cooldown(state, key, minutes):
+    last = state.get(key)
+    if not last:
+        return False
+    elapsed = (datetime.now(timezone.utc) - datetime.fromisoformat(last)).total_seconds()
+    return elapsed < minutes * 60
+
+
+def fetch_page_text(page, url):
+    """ページを開いて本文テキストを返す。Cloudflareチャレンジ通過を待つ。"""
+    page.goto(url, wait_until="domcontentloaded", timeout=60_000)
+    # Cloudflareのチャレンジ（Just a moment...）が挟まる場合があるので少し待って再取得
+    for _ in range(6):
+        text = page.inner_text("body")
+        title = page.title()
+        if "Just a moment" in title or "challenge" in page.url:
+            page.wait_for_timeout(5_000)
+            continue
+        if NO_SLOT_TEXT in text or "予約" in text:
+            return text, False
+        page.wait_for_timeout(5_000)
+    # 最後まで本文が確認できなければブロックとみなす
+    return page.inner_text("body"), True
+
+
+def notify_discord(message):
+    res = requests.post(DISCORD_WEBHOOK_URL, json={"content": message}, timeout=10)
+    res.raise_for_status()
+
+
+def main():
+    state = load_state()
+    blocked = False
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(
+            args=["--disable-blink-features=AutomationControlled"]
+        )
+        context = browser.new_context(
+            user_agent=(
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+            ),
+            locale="ja-JP",
+            viewport={"width": 1280, "height": 900},
+        )
+        page = context.new_page()
+
+        for shop in SHOPS:
+            try:
+                text, maybe_blocked = fetch_page_text(page, shop["url"])
+            except Exception as e:
+                print(f"{shop['name']}: エラー — {e}")
+                continue
+
+            if maybe_blocked:
+                print(f"{shop['name']}: ページ本文を確認できず（Cloudflareブロックの可能性）")
+                blocked = True
+                continue
+
+            if NO_SLOT_TEXT in text:
+                print(f"{shop['name']}: 空き枠なし")
+                continue
+
+            # 「枠がありません」表示が消えた＝枠が出た可能性が高い
+            key = f"notify:{shop['url']}"
+            if is_in_cooldown(state, key, NOTIFY_COOLDOWN_MIN):
+                print(f"{shop['name']}: 空きあり（クールダウン中のため通知スキップ）")
+                continue
+            notify_discord(
+                f"@everyone 🍣 **OMAKASE 空き枠が出た可能性があります**\n"
+                f"**{shop['name']}**\n→ {shop['url']}"
+            )
+            state[key] = datetime.now(timezone.utc).isoformat()
+            print(f"{shop['name']}: 空きを検出、通知しました")
+
+        browser.close()
+
+    if blocked and not is_in_cooldown(state, "_blocked", BLOCK_COOLDOWN_MIN):
+        try:
+            notify_discord(
+                "⚠️ OMAKASE監視: Cloudflareにブロックされ空き状況を確認できていない可能性があります。"
+            )
+            state["_blocked"] = datetime.now(timezone.utc).isoformat()
+        except Exception as e:
+            print(f"エラー通知の送信に失敗: {e}")
+
+    save_state(state)
+
+
+if __name__ == "__main__":
+    main()

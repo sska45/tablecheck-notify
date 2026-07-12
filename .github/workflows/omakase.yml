@@ -1,0 +1,32 @@
+name: OMAKASE 空き枠チェック
+
+on:
+  workflow_dispatch:        # cron-job.org から起動する（GitHubのscheduleは飛ばされるため使わない）
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: 状態キャッシュを復元
+        uses: actions/cache@v4
+        with:
+          path: omakase_state.json
+          key: omakase-state-${{ github.run_id }}
+          restore-keys: omakase-state-
+
+      - name: 依存パッケージインストール
+        run: |
+          pip install requests playwright
+          playwright install --with-deps chromium
+
+      - name: 空き枠チェック
+        run: python omakase_check.py
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
